@@ -8,32 +8,51 @@ contract ArtGallery is ERC721Enumerable, Ownable {
     struct ArtItem {
         string name;
         string description;
-        string uri; // URI to the 3D art object
+        uint256 price;
+        uint8 royaltyPercentage;
+        bool forSale;
     }
 
     ArtItem[] public artItems;
 
+    mapping (uint256 => address payable) private _artist;
+    mapping (uint256 => address payable) private _currentOwner;
+
+    event Purchase(address buyer, uint256 tokenId, uint256 price);
+
     constructor() ERC721("ArtGallery", "ART") {}
 
-    function createArtItem(string memory name, string memory description, string memory uri) external onlyOwner {
-        ArtItem memory newItem = ArtItem(name, description, uri);
+    function createArtItem(string memory name, string memory description, uint256 price, uint8 royaltyPercentage) external onlyOwner {
+        ArtItem memory newItem = ArtItem(name, description, price, royaltyPercentage, true);
         artItems.push(newItem);
         uint256 newArtItemId = artItems.length - 1;
         _mint(msg.sender, newArtItemId);
-        _setTokenURI(newArtItemId, uri);
+        _artist[newArtItemId] = payable(msg.sender);
+        _currentOwner[newArtItemId] = payable(msg.sender);
     }
 
-    function getArtItem(uint256 tokenId) external view returns (string memory name, string memory description, string memory uri) {
+    function getArtItem(uint256 tokenId) external view returns (string memory name, string memory description, uint256 price, uint8 royaltyPercentage, bool forSale) {
         require(_exists(tokenId), "Art item does not exist");
         ArtItem memory artItem = artItems[tokenId];
-        return (artItem.name, artItem.description, artItem.uri);
+        return (artItem.name, artItem.description, artItem.price, artItem.royaltyPercentage, artItem.forSale);
     }
 
     function purchaseArtItem(uint256 tokenId) external payable {
-        require(msg.value >= 0.1 ether, "Minimum purchase price is 0.1 ether");
         require(_exists(tokenId), "Art item does not exist");
-        address owner = ownerOf(tokenId);
-        payable(owner).transfer(msg.value);
-        _transfer(owner, msg.sender, tokenId);
+        ArtItem memory artItem = artItems[tokenId];
+        require(artItem.forSale, "Art item is not for sale");
+        require(msg.value >= artItem.price, "Insufficient funds sent");
+
+        address payable artist = _artist[tokenId];
+        address payable previousOwner = _currentOwner[tokenId];
+
+        uint256 royaltyValue = (msg.value * artItem.royaltyPercentage) / 100;
+        artist.transfer(royaltyValue);
+        previousOwner.transfer(msg.value - royaltyValue);
+
+        _currentOwner[tokenId] = payable(msg.sender);
+        _transfer(previousOwner, msg.sender, tokenId);
+
+        emit Purchase(msg.sender, tokenId, msg.value);
     }
 }
